@@ -66,7 +66,7 @@ int main (void)
 /******************************************************************************/
 //Default output device
 	DEVICE_CLSID = CLSID_AudioRendererCategory;// the audio renderer device category
-	bstrDeviceName = SysAllocString(L"ÑïÉùÆ÷ (3- USB Multimedia Audio Device)");// device name as seen in Graphedit.exe
+	bstrDeviceName = SysAllocString(L"DirectSound: ÑïÉùÆ÷ (3- USB Multimedia Audio Device)");// device name as seen in Graphedit.exe
 	cout<<pDeviceMonik<<endl;
 	pDeviceMonik = Device_Read(pDeviceEnum,pDeviceMonik,DEVICE_CLSID,bstrDeviceName);//read the required device
 	pOutputDevice = Device_Init(pDeviceMonik,pOutputDevice);//Return the device after initializing it
