@@ -5,7 +5,7 @@
 #include<windows.h>
 #include<conio.h>
 #pragma comment(lib, "strmiids")
-#pragma comment(lib, "Quartz")
+#pragma comment(lib, "quartz")
 
 
 bool Bstr_Compare(BSTR,BSTR);//Function to compare BSTR strings
