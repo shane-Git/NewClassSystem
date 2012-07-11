@@ -124,7 +124,7 @@ int main (void)
 //	prop.cbBuffer = 44100;	//250ms
 	prop.cbBuffer = 4410;	//25ms
 	prop.cbPrefix = 0;
-	prop.cBuffers = 4;
+	prop.cBuffers = 1;
 	hr = pIn2->SuggestAllocatorProperties(&prop);
 	if (FAILED(hr))
 	{
