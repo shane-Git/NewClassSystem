@@ -63,6 +63,42 @@ int main (void)
 	pInputDevice = Device_Init(pDeviceMonik,pInputDevice);//Return the device after initializing it
 	Device_Addition(pGraph,pInputDevice,bstrDeviceName);//add device to graph
 	SysFreeString(bstrDeviceName);
+//Get the information about the Capture device and media
+	IPin *pIn = NULL;
+	hr = pInputDevice->FindPin(L"Capture",&pIn);
+	if (FAILED(hr))
+	{
+		cout<<"Fail1!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	IAMStreamConfig *pPin;
+	hr = pIn->QueryInterface(IID_IAMStreamConfig,(void **)&pPin);
+	cout<<hr<<endl;
+	if (FAILED(hr))
+	{
+		cout<<"Fail2!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	cout<<pPin<<endl;
+	AM_MEDIA_TYPE *pmt={0};
+	pPin->GetFormat(&pmt);
+	cout<<"Some propertiys on this pin"<<endl;
+	cout<<"FixedSizeSamples:"<<pmt->bFixedSizeSamples<<endl;
+	cout<<"TemporalCompression:"<<pmt->bTemporalCompression<<endl;
+	cout<<"Format:"<<pmt->cbFormat<<endl;
+//	cout<<"formattype:"<<pmt->formattype<<endl;
+	cout<<"SampleSize:"<<pmt->lSampleSize<<endl;
+	WAVEFORMATEX *pWF = (WAVEFORMATEX *) pmt->pbFormat;
+	cout<<"pWF"<<endl;
+	cout<<pWF->cbSize<<endl;
+	cout<<pWF->nAvgBytesPerSec<<endl;
+	cout<<pWF->nBlockAlign<<endl;
+	cout<<pWF->nChannels<<endl;
+	cout<<pWF->nSamplesPerSec<<endl;
+	cout<<pWF->wBitsPerSample<<endl;
+	cout<<pWF->wFormatTag<<endl;
 /******************************************************************************/
 //Default output device
 	DEVICE_CLSID = CLSID_AudioRendererCategory;// the audio renderer device category
@@ -75,6 +111,30 @@ int main (void)
 /******************************************************************************/
 //Connect input to output
 	Device_Connect(pInputDevice,pOutputDevice);
+//Get the propeties of the Capture pin
+	IAMBufferNegotiation *pIn2;
+	hr = pIn->QueryInterface(IID_IAMBufferNegotiation, (void **)&pIn2);
+	if (FAILED(hr))
+	{
+		cout<<"Fail3!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	ALLOCATOR_PROPERTIES prop;
+	hr = pIn2->GetAllocatorProperties(&prop);
+	if (FAILED(hr))
+	{
+		cout<<"Fail4!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	
+	cout<<"The buffer's properties"<<endl;
+	cout<<prop.cbAlign<<endl;
+	cout<<prop.cbBuffer<<endl;
+	cout<<prop.cbPrefix<<endl;
+	cout<<prop.cBuffers<<endl;
+	cout<<"Properties end"<<endl;
 /*******************************************************************************/
 //Now run the graph
 	Run_Graph(pControl);
