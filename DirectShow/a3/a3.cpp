@@ -121,7 +121,8 @@ int main (void)
 //Improve the latency
 	ALLOCATOR_PROPERTIES prop;
 	prop.cbAlign = 1;
-	prop.cbBuffer = 44100;
+//	prop.cbBuffer = 44100;	//250ms
+	prop.cbBuffer = 4410;	//25ms
 	prop.cbPrefix = 0;
 	prop.cBuffers = 4;
 	hr = pIn2->SuggestAllocatorProperties(&prop);
