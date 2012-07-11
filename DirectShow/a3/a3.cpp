@@ -110,8 +110,6 @@ int main (void)
 	SysFreeString(bstrDeviceName);
 /******************************************************************************/
 //Connect input to output
-	Device_Connect(pInputDevice,pOutputDevice);
-//Get the propeties of the Capture pin
 	IAMBufferNegotiation *pIn2;
 	hr = pIn->QueryInterface(IID_IAMBufferNegotiation, (void **)&pIn2);
 	if (FAILED(hr))
@@ -120,7 +118,21 @@ int main (void)
 		HR_Failed(hr);
 		return -1;
 	}
+//Improve the latency
 	ALLOCATOR_PROPERTIES prop;
+	prop.cbAlign = 1;
+	prop.cbBuffer = 44100;
+	prop.cbPrefix = 0;
+	prop.cBuffers = 4;
+	hr = pIn2->SuggestAllocatorProperties(&prop);
+	if (FAILED(hr))
+	{
+		cout<<"Fail5!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	Device_Connect(pInputDevice,pOutputDevice);
+//Get the propeties of the Capture pin
 	hr = pIn2->GetAllocatorProperties(&prop);
 	if (FAILED(hr))
 	{
@@ -130,6 +142,20 @@ int main (void)
 	}
 	
 	cout<<"The buffer's properties"<<endl;
+	cout<<prop.cbAlign<<endl;
+	cout<<prop.cbBuffer<<endl;
+	cout<<prop.cbPrefix<<endl;
+	cout<<prop.cBuffers<<endl;
+	cout<<"Properties end"<<endl;
+	hr = pIn2->GetAllocatorProperties(&prop);
+	if (FAILED(hr))
+	{
+		cout<<"Fail6!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	
+	cout<<"Have a changed"<<endl;
 	cout<<prop.cbAlign<<endl;
 	cout<<prop.cbBuffer<<endl;
 	cout<<prop.cbPrefix<<endl;
