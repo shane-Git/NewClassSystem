@@ -1,0 +1,22 @@
+	IEnumPins *pPinEnum;
+	hr = pInputDevice->EnumPins(&pPinEnum);
+	if (FAILED(hr))
+	{
+		cout<<"Fail0!"<<endl;
+		HR_Failed(hr);
+		return -1;
+	}
+	PIN_INFO Info;
+	cout<<"Begin Enum"<<endl;
+	LPWSTR id = NULL;
+	while(pPinEnum->Next(1,&pIn,NULL)==S_OK)
+	{
+		cout<<"\t Begin Section"<<endl;
+		pIn->QueryPinInfo(&Info);
+		pIn->QueryId(&id);
+		cout<<id<<endl;
+		cout<<Info.achName<<endl;
+		cout<<Info.dir<<endl;
+		cout<<"\t End Section"<<endl;
+	}
+	cout<<"End Enum"<<endl;
