@@ -1,0 +1,13 @@
+	IEnumPins *pEnmuPins = NULL;
+	IPin *pEPins = NULL;
+	pImDevice->EnumPins(&pEnmuPins);
+	while(pEnmuPins->Next(1,&pEPins,NULL)==S_OK)
+	{
+		PIN_INFO TEMP_INFO;
+		LPWSTR	TEMP_STR;
+		pEPins->QueryPinInfo(&TEMP_INFO);
+		cout<<TEMP_INFO.achName<<endl;
+		cout<<TEMP_INFO.dir<<endl;
+		pEPins->QueryId(&TEMP_STR);
+		cout<<TEMP_STR<<endl;
+	}

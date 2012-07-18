@@ -1,0 +1,16 @@
+	IEnumMediaTypes *pMediaEnum = NULL;
+	AM_MEDIA_TYPE *pMedia = NULL;
+	hr = pOutPin->EnumMediaTypes(&pMediaEnum);
+	HR_Failed(hr);
+	while(pMediaEnum->Next(1,&pMedia,NULL)==S_OK)
+	{
+		WAVEFORMATEX *pWF = (WAVEFORMATEX *) pMedia->pbFormat;
+		cout<<"pWF"<<endl;
+		cout<<pWF->cbSize<<endl;
+		cout<<pWF->nAvgBytesPerSec<<endl;
+		cout<<pWF->nBlockAlign<<endl;
+		cout<<pWF->nChannels<<endl;
+		cout<<pWF->nSamplesPerSec<<endl;
+		cout<<pWF->wBitsPerSample<<endl;
+		cout<<pWF->wFormatTag<<endl;
+	}

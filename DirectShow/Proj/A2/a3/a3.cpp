@@ -114,7 +114,6 @@ int main (void)
 //Default output device
 	DEVICE_CLSID = AM_KSCATEGORY_CAPTURE;// the audio renderer device category
 	bstrDeviceName = SysAllocString(L"USB Audio Device");// device name as seen in Graphedit.exe
-	cout<<pDeviceMonik<<endl;
 	pDeviceMonik = Device_Read(pDeviceEnum,pDeviceMonik,DEVICE_CLSID,bstrDeviceName);//read the required device
 	pOutputDevice = Device_Init(pDeviceMonik,pOutputDevice);//Return the device after initializing it
 	Device_Addition(pGraph,pOutputDevice,bstrDeviceName);//add device to graph
@@ -125,34 +124,11 @@ int main (void)
 	pImDevice->FindPin(L"In",&pWrapper1);
 	pImDevice->FindPin(L"Out",&pWrapper2);
 	pOutputDevice->FindPin(L"2",&pOutPin);
+	pGraph->ConnectDirect(pInPin,pWrapper1,NULL);
+	hr = pGraph->ConnectDirect(pWrapper2,pOutPin,NULL);
 
-	IEnumMediaTypes *pMediaEnum = NULL;
-	AM_MEDIA_TYPE *pMedia = NULL;
-	AM_MEDIA_TYPE KEEP = {0};
-	hr = pWrapper2->EnumMediaTypes(&pMediaEnum);
 	HR_Failed(hr);
-	while(pMediaEnum->Next(1,&pMedia,NULL)==S_OK)
-	{
-		WAVEFORMATEX *pWF = (WAVEFORMATEX *) pMedia->pbFormat;
-		cout<<"pWF"<<endl;
-		cout<<pWF->cbSize<<endl;
-		cout<<pWF->nAvgBytesPerSec<<endl;
-		cout<<pWF->nBlockAlign<<endl;
-		cout<<pWF->nChannels<<endl;
-		cout<<pWF->nSamplesPerSec<<endl;
-		cout<<pWF->wBitsPerSample<<endl;
-		cout<<pWF->wFormatTag<<endl;
-		if(pWF->nChannels == 2 && pWF->nAvgBytesPerSec == 96000)
-		{
-			KEEP = *pMedia;
-		}
-	}
 
-	pInPin->Connect(pWrapper1,NULL);
-	hr = pWrapper2->Connect(pOutPin,NULL);
-	if(hr == VFW_E_NO_ACCEPTABLE_TYPES)
-		cout<<"OK"<<endl;
-	HR_Failed(hr);
 	DWORD dwGraphRegister;
 	AddGraphToRot(pControl, &dwGraphRegister);
 	pControl->Run();
