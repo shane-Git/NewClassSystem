@@ -1,0 +1,7 @@
+TARGETNAME=HelloDrv
+TARGETTYPE=DRIVER
+
+SOURCES=hellodrv.c \
+        hellodrv.rc
+
+MSC_WARNING_LEVEL=/W4 /WX

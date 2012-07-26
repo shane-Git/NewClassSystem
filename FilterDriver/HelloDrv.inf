@@ -1,0 +1,36 @@
+; ÎÄ¼þ£ºHelloDrv.inf
+; 
+; °æ±¾£º04/01/2010  1.0.0000.00000
+
+[Version]
+Signature="$WINDOWS NT$"
+Provider=Moore.Zhang
+DriverVer=04/01/2010, 1.0.0000.00000
+
+[SourceDisksFiles]
+HelloDrv.sys = 1,,
+
+[SourceDisksNames]
+1 = HelloDrv,,,
+
+[DestinationDirs]
+DriverFiles = 12
+
+[DriverFiles]
+HelloDrv.sys
+
+[DefaultInstall]
+CopyFiles = DriverFiles
+
+[DefaultInstall.Services]
+AddService = HelloDriver,0x00000800, HelloDrv_Inst
+
+[HelloDrv_Inst]
+DisplayName   = %ServiceDesc%   ; friendly name (see Strings)
+ServiceType   = 1                ; SERVICE_KERNEL_DRIVER
+StartType     = 3                ; SERVICE_MANUAL_START
+ErrorControl  = 1                ; SERVICE_ERROR_NORMAL
+ServiceBinary = %12%\HelloDrv.sys
+ 
+[Strings]
+ServiceDesc="Hello Driver"

@@ -11,3 +11,9 @@
 		pEPins->QueryId(&TEMP_STR);
 		cout<<TEMP_STR<<endl;
 	}
+	
+	
+	
+DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,¡°¡±);
+
+USB ana
