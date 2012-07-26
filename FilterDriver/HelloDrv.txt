@@ -10,6 +10,8 @@ Abstract:
 #include <ntddk.h>
 #include <ntddkbd.h>
 
+DRIVER_INITIALIZE DriverEntry;
+
 #define KEY_UP        1
 #define KEY_DOWN      0  
 
@@ -17,24 +19,17 @@ Abstract:
 #define CAPS_LOCK      ((USHORT)0x3A)  
 
 PDEVICE_OBJECT HookDeviceObject;
-PDEVICE_OBJECT kbdDevice;
+PDEVICE_OBJECT kbdDevice;              
 
-DRIVER_INITIALIZE DriverEntry;
-__drv_dispatchType(IRP_MJ_READ)
 DRIVER_DISPATCH KSnifferDispatchRead;
-__drv_dispatchType(IRP_MJ_DEVICE_CONTROL)
 DRIVER_DISPATCH KSnifferDispatchGeneral;
 DRIVER_UNLOAD KSnifferDriverUnload;
-DRIVER_ADD_DEVICE KSnifferAddDevice;
 IO_COMPLETION_ROUTINE KSnifferReadComplete;
-
-#pragma alloc_text (INIT, DriverEntry)
 
 NTSTATUS KSnifferDispatchRead( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp );
 NTSTATUS KSnifferReadComplete( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context );
 NTSTATUS KSnifferDispatchGeneral(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp );
-VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject);            
-NTSTATUS KSnifferAddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
+VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject);               
 
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryPath)        
 {
@@ -46,15 +41,14 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
     DriverObject->MajorFunction[IRP_MJ_READ] = KSnifferDispatchRead;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = KSnifferDispatchGeneral;
 	DriverObject->DriverUnload = KSnifferDriverUnload;
-	DriverObject->DriverExtension->AddDevice = KSnifferAddDevice;
 
     RtlInitAnsiString(&ntNameString,"\\Device\\KeyboardClass0");
     RtlAnsiStringToUnicodeString(&ntUnicodeString,&ntNameString,TRUE);
 
     status = IoCreateDevice(DriverObject,         
-                 2*sizeof(PDEVICE_OBJECT),
+                 0,
                  NULL,
-                 FILE_DEVICE_UNKNOWN,
+                 FILE_DEVICE_KEYBOARD,
                  0,
                  FALSE,
                  &HookDeviceObject);            //建立一键盘类设备
@@ -84,7 +78,7 @@ NTSTATUS KSnifferDispatchRead( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp )    
 {
 	PIO_STACK_LOCATION currentIrpStack = IoGetCurrentIrpStackLocation(Irp);        //获取当前的IRP包
 	PIO_STACK_LOCATION nextIrpStack    = IoGetNextIrpStackLocation(Irp);
-//	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This is Read\n");
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This is Read\n");
 	*nextIrpStack = *currentIrpStack;
 	IoSetCompletionRoutine( Irp, KSnifferReadComplete, DeviceObject, TRUE, TRUE, TRUE );     //调用完成例程
 	return IoCallDriver( kbdDevice, Irp );
@@ -135,20 +129,9 @@ NTSTATUS KSnifferDispatchGeneral(                //通用事件处理例程
 		return STATUS_SUCCESS;
 	}
 }
-
 VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject)
 {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	IoDetachDevice(kbdDevice);
-	IoDeleteDevice(HookDeviceObject);
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Exit the filter");
-}
-
-NTSTATUS KSnifferAddDevice(IN PDRIVER_OBJECT DeviceObject,IN PDEVICE_OBJECT FunctionalDeviceObject)
-{
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(FunctionalDeviceObject);
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Device Add In\n");
-	FunctionalDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
-	return STATUS_SUCCESS;
 }
