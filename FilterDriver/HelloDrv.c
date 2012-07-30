@@ -20,9 +20,7 @@ PDEVICE_OBJECT HookDeviceObject;
 PDEVICE_OBJECT kbdDevice;
 
 DRIVER_INITIALIZE DriverEntry;
-__drv_dispatchType(IRP_MJ_READ)
 DRIVER_DISPATCH KSnifferDispatchRead;
-__drv_dispatchType(IRP_MJ_DEVICE_CONTROL)
 DRIVER_DISPATCH KSnifferDispatchGeneral;
 DRIVER_UNLOAD KSnifferDriverUnload;
 DRIVER_ADD_DEVICE KSnifferAddDevice;
@@ -30,8 +28,8 @@ IO_COMPLETION_ROUTINE KSnifferReadComplete;
 
 #pragma alloc_text (INIT, DriverEntry)
 
-NTSTATUS KSnifferDispatchRead( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp );
-NTSTATUS KSnifferReadComplete( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context );
+NTSTATUS KSnifferDispatchRead(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp);
+NTSTATUS KSnifferReadComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PVOID Context);
 NTSTATUS KSnifferDispatchGeneral(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp );
 VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject);            
 NTSTATUS KSnifferAddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
@@ -40,8 +38,15 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 {
     STRING         ntNameString;
     UNICODE_STRING      ntUnicodeString;
+	UNICODE_STRING      DevName;
     NTSTATUS            status;
+	UCHAR					ucCnt = 0;
 	UNREFERENCED_PARAMETER(RegistryPath);
+	
+	for (ucCnt = 0; ucCnt < IRP_MJ_MAXIMUM_FUNCTION; ucCnt++){
+		DriverObject->MajorFunction[ucCnt] = KSnifferDispatchGeneral;
+	}
+
     DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Enter DriverEntry \n");
     DriverObject->MajorFunction[IRP_MJ_READ] = KSnifferDispatchRead;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = KSnifferDispatchGeneral;
@@ -50,11 +55,12 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 
     RtlInitAnsiString(&ntNameString,"\\Device\\KeyboardClass0");
     RtlAnsiStringToUnicodeString(&ntUnicodeString,&ntNameString,TRUE);
+	RtlInitUnicodeString(&DevName,L"\\Device\\KBfilter0");
 
     status = IoCreateDevice(DriverObject,         
                  2*sizeof(PDEVICE_OBJECT),
-                 NULL,
-                 FILE_DEVICE_UNKNOWN,
+                 &DevName,
+                 FILE_DEVICE_KEYBOARD,
                  0,
                  FALSE,
                  &HookDeviceObject);            //建立一键盘类设备
