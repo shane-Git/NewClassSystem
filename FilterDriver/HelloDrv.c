@@ -28,6 +28,22 @@ IO_COMPLETION_ROUTINE KSnifferReadComplete;
 
 #pragma alloc_text (INIT, DriverEntry)
 
+extern POBJECT_TYPE *IoDriverObjectType;
+
+extern NTKERNELAPI
+NTSTATUS
+ObReferenceObjectByName(
+    IN PUNICODE_STRING ObjectName,
+    IN ULONG Attributes,
+    IN PACCESS_STATE PassedAccessState OPTIONAL,
+    IN ACCESS_MASK DesiredAccess OPTIONAL,
+    IN POBJECT_TYPE ObjectType,
+    IN KPROCESSOR_MODE AccessMode,
+    IN OUT PVOID ParseContext OPTIONAL,
+    OUT PVOID *Object
+    );
+
+
 NTSTATUS KSnifferDispatchRead(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp);
 NTSTATUS KSnifferReadComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PVOID Context);
 NTSTATUS KSnifferDispatchGeneral(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp );
@@ -36,31 +52,55 @@ NTSTATUS KSnifferAddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);
 
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryPath)        
 {
-    STRING         ntNameString;
-    UNICODE_STRING      ntUnicodeString;
-	UNICODE_STRING      DevName;
-    NTSTATUS            status;
-	UCHAR					ucCnt = 0;
+    STRING ntNameString;
+    UNICODE_STRING ntUnicodeString;
+	UNICODE_STRING DriverName;
+	UNICODE_STRING DevName;
+    NTSTATUS status;
+	UCHAR ucCnt = 0;
+	PDRIVER_OBJECT AudioDriver = NULL;
+	PDEVICE_OBJECT DeviceObject = NULL;
 	UNREFERENCED_PARAMETER(RegistryPath);
 	
-	for (ucCnt = 0; ucCnt < IRP_MJ_MAXIMUM_FUNCTION; ucCnt++){
+	for (ucCnt = 0; ucCnt < IRP_MJ_MAXIMUM_FUNCTION; ucCnt++)
+	{
 		DriverObject->MajorFunction[ucCnt] = KSnifferDispatchGeneral;
 	}
 
     DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Enter DriverEntry \n");
     DriverObject->MajorFunction[IRP_MJ_READ] = KSnifferDispatchRead;
-    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = KSnifferDispatchGeneral;
 	DriverObject->DriverUnload = KSnifferDriverUnload;
 	DriverObject->DriverExtension->AddDevice = KSnifferAddDevice;
 
     RtlInitAnsiString(&ntNameString,"\\Device\\KeyboardClass0");
     RtlAnsiStringToUnicodeString(&ntUnicodeString,&ntNameString,TRUE);
 	RtlInitUnicodeString(&DevName,L"\\Device\\KBfilter0");
+	RtlInitUnicodeString(&DriverName,L"\\Driver\\usbaudio");
+	
+	ObReferenceObjectByName( &DriverName,
+                           OBJ_CASE_INSENSITIVE,
+                           NULL,
+                           0,
+                           *IoDriverObjectType,
+                           KernelMode,
+                           NULL,
+                           &AudioDriver );
+	if ( AudioDriver == NULL )
+	{
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Not found USB Keyboard Device hidusb!\n" );
+		return STATUS_UNSUCCESSFUL;
+	}
+	else
+	{
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Get it found USB Keyboard Device hidusb!\n" );
+		DeviceObject = AudioDriver -> DeviceObject;
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"hidusb!%x\n",DeviceObject);
+	}
 
     status = IoCreateDevice(DriverObject,         
                  2*sizeof(PDEVICE_OBJECT),
                  &DevName,
-                 FILE_DEVICE_KEYBOARD,
+                 FILE_DEVICE_UNKNOWN,
                  0,
                  FALSE,
                  &HookDeviceObject);            //建立一键盘类设备
@@ -72,7 +112,7 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 	}
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Successfully Create\n");
     HookDeviceObject->Flags |= DO_BUFFERED_IO;
-    status = IoAttachDevice( HookDeviceObject, &ntUnicodeString, &kbdDevice );      //连接我们的过滤设备到\\Device\\KeyboardClass0设备上
+    IoAttachDeviceToDeviceStack(HookDeviceObject,DeviceObject);      //连接我们的过滤设备到\\Device\\KeyboardClass0设备上
     if(!NT_SUCCESS(status)) 
 	{
 		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Connect with keyboard failed!\n");
