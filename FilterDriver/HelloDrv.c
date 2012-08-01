@@ -16,6 +16,23 @@ Abstract:
 #define LCONTROL      ((USHORT)0x1D)
 #define CAPS_LOCK      ((USHORT)0x3A)  
 
+
+typedef struct DEVICE_EXTENSION {
+ PDEVICE_OBJECT DeviceObject;   // device object this extension belongs to
+ PDEVICE_OBJECT LowerDeviceObject;  // next lower driver in same stack
+ PDEVICE_OBJECT Pdo;      // the PDO
+ IO_REMOVE_LOCK RemoveLock;
+ } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
+
+ 
+NTSTATUS CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info)
+{       // CompleteRequest
+ Irp->IoStatus.Status = status;
+ Irp->IoStatus.Information = info;
+ IoCompleteRequest(Irp, IO_NO_INCREMENT);
+ return status;
+}
+
 PDEVICE_OBJECT HookDeviceObject;
 PDEVICE_OBJECT kbdDevice;
 
@@ -47,6 +64,8 @@ ObReferenceObjectByName(
 NTSTATUS KSnifferDispatchRead(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp);
 NTSTATUS KSnifferReadComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PVOID Context);
 NTSTATUS KSnifferDispatchGeneral(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp );
+NTSTATUS DispatchPnp(PDEVICE_OBJECT fido, PIRP Irp);
+NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp);
 VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject);            
 NTSTATUS KSnifferAddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
 
@@ -62,12 +81,14 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 	PDEVICE_OBJECT DeviceObject = NULL;
 	UNREFERENCED_PARAMETER(RegistryPath);
 	
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Enter DriverEntry \n");
+	
 	for (ucCnt = 0; ucCnt < IRP_MJ_MAXIMUM_FUNCTION; ucCnt++)
 	{
 		DriverObject->MajorFunction[ucCnt] = KSnifferDispatchGeneral;
 	}
-
-    DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Enter DriverEntry \n");
+	DriverObject->MajorFunction[IRP_MJ_POWER] = DispatchPower;
+	DriverObject->MajorFunction[IRP_MJ_PNP] = DispatchPnp;
     DriverObject->MajorFunction[IRP_MJ_READ] = KSnifferDispatchRead;
 	DriverObject->DriverUnload = KSnifferDriverUnload;
 	DriverObject->DriverExtension->AddDevice = KSnifferAddDevice;
@@ -197,4 +218,44 @@ NTSTATUS KSnifferAddDevice(IN PDRIVER_OBJECT DeviceObject,IN PDEVICE_OBJECT Func
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Device Add In\n");
 	FunctionalDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 	return STATUS_SUCCESS;
+}
+
+NTSTATUS DispatchPnp(PDEVICE_OBJECT fido, PIRP Irp)
+{
+	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+	PIO_STACK_LOCATION stack;
+	ULONG fcn;
+	NTSTATUS status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
+	if (!NT_SUCCESS(status))
+		return CompleteRequest(Irp, status, 0);
+	stack = IoGetCurrentIrpStackLocation(Irp);
+	fcn = stack->MinorFunction; 
+	IoSkipCurrentIrpStackLocation(Irp);
+	status = IoCallDriver(pdx->LowerDeviceObject, Irp);
+	if (fcn == IRP_MN_REMOVE_DEVICE)
+	{
+		IoReleaseRemoveLockAndWait(&pdx->RemoveLock, Irp);
+		IoDetachDevice(pdx->LowerDeviceObject);
+		IoDeleteDevice(fido);
+	}
+	else
+		IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	return status;
+}
+
+NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp)
+{
+	PDEVICE_EXTENSION pdx;
+	NTSTATUS status;
+	PoStartNextPowerIrp(Irp);
+	pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
+	if (!NT_SUCCESS(status))
+	{
+		return CompleteRequest(Irp, status, 0);
+		IoSkipCurrentIrpStackLocation(Irp);
+		status = PoCallDriver(pdx->LowerDeviceObject, Irp);
+		IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+		return status;
+	}
 }
