@@ -17,36 +17,43 @@ Abstract:
 #define CAPS_LOCK      ((USHORT)0x3A)  
 
 
-typedef struct DEVICE_EXTENSION {
- PDEVICE_OBJECT DeviceObject;   // device object this extension belongs to
- PDEVICE_OBJECT LowerDeviceObject;  // next lower driver in same stack
- PDEVICE_OBJECT Pdo;      // the PDO
- IO_REMOVE_LOCK RemoveLock;
- } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
+DRIVER_INITIALIZE DriverEntry;
+DRIVER_UNLOAD DriverUnload;
+
+typedef struct DEVICE_EXTENSION
+{
+	PDEVICE_OBJECT DeviceObject;   // device object this extension belongs to
+	PDEVICE_OBJECT LowerDeviceObject;  // next lower driver in same stack
+	PDEVICE_OBJECT Pdo;      // the PDO
+	IO_REMOVE_LOCK RemoveLock;
+} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
 
  
 NTSTATUS CompleteRequest(IN PIRP Irp, IN NTSTATUS status, IN ULONG_PTR info)
 {       // CompleteRequest
- Irp->IoStatus.Status = status;
- Irp->IoStatus.Information = info;
- IoCompleteRequest(Irp, IO_NO_INCREMENT);
- return status;
+	Irp->IoStatus.Status = status;
+	Irp->IoStatus.Information = info;
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
+	return status;
 }
 
-PDEVICE_OBJECT HookDeviceObject;
-PDEVICE_OBJECT kbdDevice;
+ULONG GetDeviceTypeToUse(PDEVICE_OBJECT pdo)
+{							// GetDeviceTypeToUse
+	PDEVICE_OBJECT ldo;
+	ULONG devtype;
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This function is used to get device type\n");
+	ldo = IoGetAttachedDeviceReference(pdo);
+	if (!ldo)
+		return FILE_DEVICE_UNKNOWN;
+	devtype = ldo->DeviceType;
+	ObDereferenceObject(ldo);
+	return devtype;
+}
 
-DRIVER_INITIALIZE DriverEntry;
-DRIVER_DISPATCH KSnifferDispatchRead;
-DRIVER_DISPATCH KSnifferDispatchGeneral;
-DRIVER_UNLOAD KSnifferDriverUnload;
-DRIVER_ADD_DEVICE KSnifferAddDevice;
-IO_COMPLETION_ROUTINE KSnifferReadComplete;
 
-#pragma alloc_text (INIT, DriverEntry)
+
 
 extern POBJECT_TYPE *IoDriverObjectType;
-
 extern NTKERNELAPI
 NTSTATUS
 ObReferenceObjectByName(
@@ -61,135 +68,35 @@ ObReferenceObjectByName(
     );
 
 
-NTSTATUS KSnifferDispatchRead(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp);
-NTSTATUS KSnifferReadComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PVOID Context);
-NTSTATUS KSnifferDispatchGeneral(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp );
+NTSTATUS DispatchAny(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp );
 NTSTATUS DispatchPnp(PDEVICE_OBJECT fido, PIRP Irp);
 NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp);
-VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject);            
-NTSTATUS KSnifferAddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
+VOID DriverUnload(IN PDRIVER_OBJECT DeviceObject);            
+NTSTATUS AddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
 
 
 NTSTATUS UsageNotificationCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx);
 NTSTATUS StartDeviceCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx);
 VOID RemoveDevice(IN PDEVICE_OBJECT fido);
 
+#pragma alloc_text (INIT, DriverEntry)
+
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryPath)        
 {
-	
-	STRING ntNameString;
-    UNICODE_STRING ntUnicodeString;
-	UNICODE_STRING DriverName;
-	UNICODE_STRING DevName;
-    NTSTATUS status;
 	UCHAR ucCnt = 0;
-	PDRIVER_OBJECT AudioDriver = NULL;
-	PDEVICE_OBJECT DeviceObject = NULL;
-	
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Device Add In\n");
-    RtlInitAnsiString(&ntNameString,"\\Device\\KeyboardClass0");
-    RtlAnsiStringToUnicodeString(&ntUnicodeString,&ntNameString,TRUE);
-	RtlInitUnicodeString(&DevName,L"\\Device\\KBfilter0");
-	RtlInitUnicodeString(&DriverName,L"\\Driver\\usbaudio");
-
-	
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Enter DriverEntry \n");
-	
+	DriverObject->DriverUnload = DriverUnload;
+	DriverObject->DriverExtension->AddDevice = AddDevice;
 	for (ucCnt = 0; ucCnt < IRP_MJ_MAXIMUM_FUNCTION; ucCnt++)
 	{
-		DriverObject->MajorFunction[ucCnt] = KSnifferDispatchGeneral;
+		DriverObject->MajorFunction[ucCnt] = DispatchAny;
 	}
-	DriverObject->MajorFunction[IRP_MJ_POWER] = DispatchPower;
 	DriverObject->MajorFunction[IRP_MJ_PNP] = DispatchPnp;
-    DriverObject->MajorFunction[IRP_MJ_READ] = KSnifferDispatchRead;
-	DriverObject->DriverUnload = KSnifferDriverUnload;
-	DriverObject->DriverExtension->AddDevice = KSnifferAddDevice;
-	
-	
-	ObReferenceObjectByName( &DriverName,
-                           OBJ_CASE_INSENSITIVE,
-                           NULL,
-                           0,
-                           *IoDriverObjectType,
-                           KernelMode,
-                           NULL,
-                           &AudioDriver );
-	if ( AudioDriver == NULL )
-	{
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Not found USB Keyboard Device hidusb!\n" );
-		return STATUS_UNSUCCESSFUL;
-	}
-	else
-	{
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Get it found USB Keyboard Device hidusb!\n" );
-		DeviceObject = AudioDriver -> DeviceObject;
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"hidusb!%x\n",DeviceObject);
-	}
-
-    status = IoCreateDevice(DriverObject,         
-                 2*sizeof(PDEVICE_OBJECT),
-                 &DevName,
-                 FILE_DEVICE_UNKNOWN,
-                 0,
-                 FALSE,
-                 &HookDeviceObject);            //建立一键盘类设备
-	if(!NT_SUCCESS(status)) 
-	{
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Init Error\n");
-		RtlFreeUnicodeString(&ntUnicodeString);
-		return STATUS_SUCCESS;
-	}
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Successfully Create\n");
-    HookDeviceObject->Flags |= DO_BUFFERED_IO;
-    IoAttachDeviceToDeviceStack(HookDeviceObject,DeviceObject);      //连接我们的过滤设备到\\Device\\KeyboardClass0设备上
-    if(!NT_SUCCESS(status)) 
-	{
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Connect with keyboard failed!\n");
-		IoDeleteDevice(HookDeviceObject);
-		RtlFreeUnicodeString(&ntUnicodeString);
-		return STATUS_SUCCESS;
-	}
-	RtlFreeUnicodeString( &ntUnicodeString );
-
+	DriverObject->MajorFunction[IRP_MJ_POWER] = DispatchPower;
 	return STATUS_SUCCESS;
 }
 
-
-NTSTATUS KSnifferDispatchRead( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp )        //有按键按下时执行
-{
-	PIO_STACK_LOCATION currentIrpStack = IoGetCurrentIrpStackLocation(Irp);        //获取当前的IRP包
-	PIO_STACK_LOCATION nextIrpStack    = IoGetNextIrpStackLocation(Irp);
-//	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This is Read\n");
-	*nextIrpStack = *currentIrpStack;
-	IoSetCompletionRoutine( Irp, KSnifferReadComplete, DeviceObject, TRUE, TRUE, TRUE );     //调用完成例程
-	return IoCallDriver( kbdDevice, Irp );
-}
-
-NTSTATUS KSnifferReadComplete( IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context )
-{
-	PIO_STACK_LOCATION IrpSp;
-	PKEYBOARD_INPUT_DATA KeyData;
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(Context);
-	IrpSp = IoGetCurrentIrpStackLocation( Irp );
-	if( NT_SUCCESS( Irp->IoStatus.Status ) ) 
-    {
-		KeyData = Irp->AssociatedIrp.SystemBuffer;
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"ScanCode: %x ", KeyData->MakeCode );
-		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"%s\n", KeyData->Flags ? "Up" : "Down" );      //输出按键的扫描码
-		if( KeyData->MakeCode == CAPS_LOCK) 
-		{
-			KeyData->MakeCode = LCONTROL;                  //修改按键
-		}  
-	}
-	if( Irp->PendingReturned ) 
-	{
-		IoMarkIrpPending( Irp );
-	}
-	return Irp->IoStatus.Status;
-}
-
-NTSTATUS KSnifferDispatchGeneral(                //通用事件处理例程
+NTSTATUS DispatchAny(                //通用事件处理例程
     IN PDEVICE_OBJECT fido,
     IN PIRP          Irp )
 {
@@ -206,19 +113,60 @@ NTSTATUS KSnifferDispatchGeneral(                //通用事件处理例程
 	return status;
 }
 
-VOID KSnifferDriverUnload(IN PDRIVER_OBJECT DeviceObject)
+VOID DriverUnload(IN PDRIVER_OBJECT DeviceObject)
 {
 	UNREFERENCED_PARAMETER(DeviceObject);
-	IoDetachDevice(kbdDevice);
-	IoDeleteDevice(HookDeviceObject);
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Exit the filter");
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Exit the filter\n");
 }
 
-NTSTATUS KSnifferAddDevice(IN PDRIVER_OBJECT DeviceObject,IN PDEVICE_OBJECT FunctionalDeviceObject)
+NTSTATUS AddDevice(IN PDRIVER_OBJECT DriverObject,IN PDEVICE_OBJECT pdo)
 {
-	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Successfully connected to keyboard device\n");
-	FunctionalDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
-	return STATUS_SUCCESS;
+	NTSTATUS status;
+	PDEVICE_OBJECT fido;
+	PDEVICE_EXTENSION pdx;
+	PDEVICE_OBJECT fdo;
+	
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Successfully connected Driver:%X;Device:%X\n",DriverObject,pdo);
+	
+	status = IoCreateDevice(DriverObject, sizeof(DEVICE_EXTENSION), NULL,
+		FILE_DEVICE_UNKNOWN, 0, FALSE, &fido);
+	
+	if (!NT_SUCCESS(status))
+	{						// can't create device object
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL," - IoCreateDevice failed - %X\n", status);
+		return status;
+	}						// can't create device object
+	pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+
+	do
+	{	// finish initialization
+		IoInitializeRemoveLock(&pdx->RemoveLock, 0, 0, 0);
+		pdx->DeviceObject = fido;
+		pdx->Pdo = pdo;
+		//将过滤驱动附加在底层驱动之上
+		fdo = IoAttachDeviceToDeviceStack(fido, pdo);
+		if (!fdo)
+		{					// can't attach								 
+			DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"DRIVERNAME  - IoAttachDeviceToDeviceStack failed\n");
+			status = STATUS_DEVICE_REMOVED;
+			break;
+		}					// can't attach
+		//记录底层驱动
+		pdx->LowerDeviceObject = fdo;
+		//由于不知道底层驱动是直接IO还是BufferIO，因此将标志都置上
+		fido->Flags |= fdo->Flags & (DO_DIRECT_IO | DO_BUFFERED_IO | DO_POWER_PAGABLE);
+		// Clear the "initializing" flag so that we can get IRPs
+		fido->Flags &= ~DO_DEVICE_INITIALIZING;
+	}	while (FALSE);					// finish initialization
+
+	if (!NT_SUCCESS(status))
+	{					// need to cleanup
+		if (pdx->LowerDeviceObject)
+			IoDetachDevice(pdx->LowerDeviceObject);
+		IoDeleteDevice(fido);
+	}					// need to cleanup
+
+	return status;
 }
 
 NTSTATUS DispatchPnp(PDEVICE_OBJECT fido, PIRP Irp)
@@ -227,6 +175,7 @@ NTSTATUS DispatchPnp(PDEVICE_OBJECT fido, PIRP Irp)
 	ULONG fcn = stack->MinorFunction;
 	NTSTATUS status;
 	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"PNP\n");
 	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
 	if (!NT_SUCCESS(status))
 		return CompleteRequest(Irp, status, 0);
@@ -271,6 +220,7 @@ NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp)
 {
 	PDEVICE_EXTENSION pdx;
 	NTSTATUS status;
+	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Power\n");
 	PoStartNextPowerIrp(Irp);
 	pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
 	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
