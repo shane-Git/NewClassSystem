@@ -9,13 +9,8 @@ Abstract:
 
 #include <ntddk.h>
 #include <ntddkbd.h>
-
-#define KEY_UP        1
-#define KEY_DOWN      0  
-
-#define LCONTROL      ((USHORT)0x1D)
-#define CAPS_LOCK      ((USHORT)0x3A)  
-
+#include <Usbioctl.h>
+#include <Usb.h>
 
 DRIVER_INITIALIZE DriverEntry;
 DRIVER_UNLOAD DriverUnload;
@@ -50,7 +45,34 @@ ULONG GetDeviceTypeToUse(PDEVICE_OBJECT pdo)
 	return devtype;
 }
 
+void DumpBuffer(unsigned char * buf, int len)
+{
+#define NB_BYTE 16 /* number of bytes displayed per line */
 
+	char str[NB_BYTE*3 + 1];
+	char * p;
+	int i,j;
+	char c;
+
+	for (i=0;i<len;i+=NB_BYTE)
+	{
+		p = str;
+
+		for (j=i;j<len&&j<i+NB_BYTE;j++)
+		{
+			c;
+
+			*p++ = ' ';
+			c = (buf[j] >> 4) & 0xf;
+			*p++ = (c<10) ? c+'0' : c-10+'a';
+			c = buf[j] & 0xf;
+			*p++ = (c<10) ? c+'0' : c-10+'a';
+		}
+		*p = 0;
+
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"\t\t%04x:%s\n",i,str);
+	}
+}
 
 
 extern POBJECT_TYPE *IoDriverObjectType;
@@ -74,6 +96,8 @@ NTSTATUS DispatchPower(PDEVICE_OBJECT fido, PIRP Irp);
 VOID DriverUnload(IN PDRIVER_OBJECT DeviceObject);            
 NTSTATUS AddDevice(PDRIVER_OBJECT pDrvObj, PDEVICE_OBJECT pPhysDevObj);   
 
+NTSTATUS DispatchSpecial(IN PDEVICE_OBJECT fido,IN PIRP Irp);
+
 
 NTSTATUS UsageNotificationCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx);
 NTSTATUS StartDeviceCompletionRoutine(PDEVICE_OBJECT fido, PIRP Irp, PDEVICE_EXTENSION pdx);
@@ -93,10 +117,11 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT DriverObject,IN PUNICODE_STRING RegistryP
 	}
 	DriverObject->MajorFunction[IRP_MJ_PNP] = DispatchPnp;
 	DriverObject->MajorFunction[IRP_MJ_POWER] = DispatchPower;
+	DriverObject->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL] = DispatchSpecial;
 	return STATUS_SUCCESS;
 }
 
-NTSTATUS DispatchAny(                //通用事件处理例程
+NTSTATUS DispatchAny(
     IN PDEVICE_OBJECT fido,
     IN PIRP          Irp )
 {
@@ -104,6 +129,55 @@ NTSTATUS DispatchAny(                //通用事件处理例程
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
 	NTSTATUS status;
 	DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This is General\n");
+	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
+	if (!NT_SUCCESS(status))
+		return CompleteRequest(Irp, status, 0);
+	IoSkipCurrentIrpStackLocation(Irp);
+	status = IoCallDriver(pdx->LowerDeviceObject, Irp);
+	IoReleaseRemoveLock(&pdx->RemoveLock, Irp);
+	return status;
+}
+
+NTSTATUS DispatchSpecial(
+    IN PDEVICE_OBJECT fido,
+    IN PIRP          Irp )
+{
+	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION) fido->DeviceExtension;
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
+	NTSTATUS status;
+	PURB pUrb;
+	USHORT cFounctionCode;
+	USHORT cLength;
+	USBD_STATUS lUsbdStatus;
+	struct _URB_ISOCH_TRANSFER * pIsochTransfer;
+	ULONG dwControlCode = stack->Parameters.DeviceIoControl.IoControlCode;
+	if(dwControlCode == IOCTL_INTERNAL_USB_SUBMIT_URB)
+	{
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"A URB was submitted\n");
+		pUrb = (PURB) stack->Parameters.Others.Argument1;
+		if(pUrb == NULL)
+		{
+			DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Not Found URB\n");
+		}
+		else
+		{
+			cFounctionCode = pUrb->UrbHeader.Function;
+			cLength = pUrb->UrbHeader.Length;
+			lUsbdStatus = pUrb->UrbHeader.Status;
+			DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"Found URB,Function:%d,Length:%d,status:0x%X\n",cFounctionCode,cLength,lUsbdStatus);
+			if(cFounctionCode == URB_FUNCTION_ISOCH_TRANSFER)
+			{
+				pIsochTransfer = (struct _URB_ISOCH_TRANSFER *) pUrb;
+				DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"ISOCH_TRANSFER,length:%u,Buffer:%X,StartFrame:%u,NumberOfPkt:%u\n"
+				,pIsochTransfer->TransferBufferLength,pIsochTransfer->TransferBuffer,pIsochTransfer->StartFrame,pIsochTransfer->NumberOfPackets);
+				DumpBuffer(pIsochTransfer->TransferBuffer,pIsochTransfer->TransferBufferLength);
+			}
+		}
+	}
+	else
+	{
+		DbgPrintEx(DPFLTR_DEFAULT_ID,DPFLTR_ERROR_LEVEL,"This is Special\n");
+	}
 	status = IoAcquireRemoveLock(&pdx->RemoveLock, Irp);
 	if (!NT_SUCCESS(status))
 		return CompleteRequest(Irp, status, 0);
